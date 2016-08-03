@@ -28,30 +28,25 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use('/', routes);
 app.use('/users', users);
 
-var emptyChar = "111111011111111";
-
-// Get a chached problem set
-app.get('/imagetext/:name', function(req, res) {
-  var imgName = req.params.name;
-  var rowIndex, colIndex;
-
-  var imageFileName = imgName + '.png';
-  var messageFileName = imgName + '.txt';
-
-  if ( ! fs.statSync(imageFileName).isFile()) { 
-    throw "Missing image file: " + imageFileName;
+/** */
+function leftPad(source, radix) {
+  if (2 == radix) {
+    return ('0000000000000000'+source).substring(source.length);
+  } else if (16 == radix) {
+    return ('0000'+source).substring(source.length);
+  } else {
+    throw "Radix not supported for left pad";
   }
-  if ( ! fs.statSync(messageFileName).isFile()) { 
-    throw "Missing message file: " + messageFileName;
-  }
+}
 
-  var message = fs.readFileSync(messageFileName, { encoding: 'utf8' });
-  console.log("Message Text: " + message);
-  var messageIndex = 0;
-
+/** Generate the poem text in the requsted radix (likely hex or binary) */
+function produceText(imageFileName, message, radix, res) {
   var channels = -1;
   var scanLength = -1;
+  var messageIndex = 0;
   var imageDesc = "";
+  var emptyChar = leftPad((0xFEFF).toString(radix), radix);
+  var spaceChar = leftPad(" ".charCodeAt(0).toString(radix), radix);
 
   fs.createReadStream(imageFileName)
       .pipe(new PNG({
@@ -70,7 +65,11 @@ app.get('/imagetext/:name', function(req, res) {
           var textData = "", binStr;
 
           imageDesc += " Pixels: " + data.length;
-          res.write("<p>" + imageDesc + "</p>");
+          res.write("<head>");
+          res.write("<style>");
+          res.write('body { font-family: Courier,Monospace; font-size: 4pt; }');
+          res.write("</style>");
+          res.write("</head><body><p>");
           console.log(imageDesc);
 
           for (rowIndex = 0; rowIndex < this.height; rowIndex += 1) {
@@ -84,14 +83,16 @@ app.get('/imagetext/:name', function(req, res) {
               //console.log("Alpha channel: " + alphaCh);
               if (alphaCh > 0) {
                 // Write binary representation of the message char
-                textData += "00000000";
                 char = message[messageIndex++];
                 //console.log("Add message char: " + char);
                 // Get binary string rep. of char.
-                binStr = char.charCodeAt(0).toString(2);
-                // Left-pad with 0s if str < 8 chars long
-                binStr = ('00000000'+binStr).substring(binStr.length);
-                textData += binStr;
+                if (char) {
+                  binStr = char.charCodeAt(0).toString(radix);
+                  textData += leftPad(binStr, radix);
+                } else {
+                  // Insert space char if we've run out of message.
+                  textData += spaceChar;
+                }
               } else {
                 textData += emptyChar;
               }
@@ -101,9 +102,33 @@ app.get('/imagetext/:name', function(req, res) {
             res.write(textData + "<br>");
           } // Each Row
 
+          res.write("</p></body>");
+          console.log("Used " + messageIndex + " chars from message.");
           res.end();
       });  
+}
 
+// Get a chached problem set
+app.get('/imagetext/:name/:radix', function(req, res) {
+  var imgName = req.params.name;
+  var radixStr = req.params.radix;
+  var rowIndex, colIndex;
+
+  var radix = Number(radixStr);
+  var imageFileName = imgName + '.png';
+  var messageFileName = imgName + '.txt';
+
+  if ( ! fs.statSync(imageFileName).isFile()) { 
+    throw "Missing image file: " + imageFileName;
+  }
+  if ( ! fs.statSync(messageFileName).isFile()) { 
+    throw "Missing message file: " + messageFileName;
+  }
+
+  var message = fs.readFileSync(messageFileName, { encoding: 'utf8' });
+  //console.log("Message Text: " + message);
+
+  produceText(imageFileName, message, radix, res);
 });
 
 // catch 404 and forward to error handler
